@@ -2,7 +2,7 @@ import os
 import requests
 import numpy as np
 import tensorflow as tf
-from flask import Flask, render_template_string, request
+from flask import Flask, render_template_string, request, jsonify
 from werkzeug.utils import secure_filename
 from PIL import Image
 
@@ -11,7 +11,7 @@ os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
 # Use a placeholder URL for the model. You'll need to replace this
 # with the actual URL where you host your model file.
-MODEL_URL = "http://shoppingbuzzmall.com/chest_xray_model.h5"
+MODEL_URL = "https://example.com/chest_xray_model.h5"
 MODEL_PATH = 'chest_xray_model.h5'
 TEMP_UPLOAD_DIR = "/tmp"
 
@@ -57,51 +57,28 @@ app = Flask(__name__)
 # Define the prediction function
 def predict_pneumonia(img_path):
     if model is None:
-        return "Error: Model not loaded."
+        return {"error": "Model not loaded."}
 
-    # Load and preprocess the image
-    img = Image.open(img_path).resize((224, 224)).convert('RGB')
-    img_array = np.array(img)
-    img_array = np.expand_dims(img_array, axis=0)
-    img_array = img_array.astype('float32') / 255.0
+    try:
+        # Load and preprocess the image
+        img = Image.open(img_path).resize((224, 224)).convert('RGB')
+        img_array = np.array(img)
+        img_array = np.expand_dims(img_array, axis=0)
+        img_array = img_array.astype('float32') / 255.0
 
-    # Make a prediction
-    prediction = model.predict(img_array)
+        # Make a prediction
+        prediction = model.predict(img_array)
 
-    # Return the class based on the prediction
-    if prediction[0][0] > 0.5:
-        return "PNEUMONIA"
-    else:
-        return "NORMAL"
+        # Return the class and probability
+        result = "PNEUMONIA" if prediction[0][0] > 0.5 else "NORMAL"
+        probability = float(prediction[0][0])
+        
+        return {"result": result, "probability": probability}
+    except Exception as e:
+        return {"error": str(e)}
 
-@app.route('/', methods=['GET', 'POST'])
+@app.route('/', methods=['GET'])
 def index():
-    prediction_result = None
-
-    if request.method == 'POST':
-        if 'file' not in request.files:
-            prediction_result = "No file part in the request."
-        else:
-            file = request.files['file']
-            if file.filename == '':
-                prediction_result = "No file selected."
-            elif file:
-                filename = secure_filename(file.filename)
-                filepath = os.path.join(TEMP_UPLOAD_DIR, filename)
-
-                try:
-                    # Save the file to a temporary location
-                    file.save(filepath)
-
-                    # Get the prediction
-                    prediction_result = predict_pneumonia(filepath)
-                except Exception as e:
-                    prediction_result = f"An error occurred: {e}"
-                finally:
-                    # Clean up the uploaded file
-                    if os.path.exists(filepath):
-                        os.remove(filepath)
-
     # Render the HTML using Flask's render_template_string
     return render_template_string('''
         <!DOCTYPE html>
@@ -115,6 +92,10 @@ def index():
                 body {
                     font-family: 'Inter', sans-serif;
                 }
+                .process-step.completed {
+                    color: green;
+                    font-weight: bold;
+                }
             </style>
         </head>
         <body class="bg-gray-100 flex items-center justify-center min-h-screen">
@@ -122,10 +103,10 @@ def index():
                 <h1 class="text-3xl font-bold text-center text-gray-800 mb-6">Pneumonia Predictor</h1>
                 <p class="text-center text-gray-600 mb-8">Upload a chest X-ray image to get a prediction.</p>
 
-                <form action="/" method="post" enctype="multipart/form-data" class="space-y-4">
+                <form id="upload-form" action="/predict" method="post" enctype="multipart/form-data" class="space-y-4">
                     <label class="block">
                         <span class="sr-only">Choose file</span>
-                        <input type="file" name="file" accept="image/*" class="block w-full text-sm text-gray-500
+                        <input type="file" name="file" id="file-input" accept="image/*" class="block w-full text-sm text-gray-500
                             file:mr-4 file:py-2 file:px-4
                             file:rounded-full file:border-0
                             file:text-sm file:font-semibold
@@ -133,27 +114,115 @@ def index():
                             hover:file:bg-blue-100
                         "/>
                     </label>
-                    <button type="submit" class="w-full py-2 px-4 bg-blue-600 text-white font-semibold rounded-full shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition ease-in-out duration-150">
+                    <button type="submit" id="submit-button" class="w-full py-2 px-4 bg-blue-600 text-white font-semibold rounded-full shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition ease-in-out duration-150">
                         Predict
                     </button>
                 </form>
 
-                {% if prediction %}
-                <div class="mt-8 p-4 rounded-xl text-center
-                    {% if prediction == 'PNEUMONIA' %}
-                        bg-red-100 text-red-700
-                    {% else %}
-                        bg-green-100 text-green-700
-                    {% endif %}
-                ">
-                    <p class="font-bold text-lg">Prediction Result:</p>
-                    <p class="text-2xl mt-2 font-bold">{{ prediction }}</p>
+                <div id="process-status" class="mt-8 text-gray-600 space-y-2 hidden">
+                    <p class="text-lg font-bold">Prediction Process:</p>
+                    <p id="step-upload" class="process-step">1. Uploading image...</p>
+                    <p id="step-preprocess" class="process-step">2. Preprocessing image...</p>
+                    <p id="step-predict" class="process-step">3. Making a prediction...</p>
                 </div>
-                {% endif %}
+
+                <div id="prediction-result" class="mt-8 p-4 rounded-xl text-center hidden">
+                    <!-- Result will be inserted here by JavaScript -->
+                </div>
             </div>
+
+            <script>
+                document.getElementById('upload-form').addEventListener('submit', async function(event) {
+                    event.preventDefault();
+                    
+                    const form = event.target;
+                    const formData = new FormData(form);
+                    const fileInput = document.getElementById('file-input');
+                    
+                    // Show processing status and clear previous results
+                    const statusDiv = document.getElementById('process-status');
+                    const resultDiv = document.getElementById('prediction-result');
+                    statusDiv.classList.remove('hidden');
+                    resultDiv.classList.add('hidden');
+                    document.querySelectorAll('.process-step').forEach(el => el.classList.remove('completed'));
+                    
+                    const submitButton = document.getElementById('submit-button');
+                    submitButton.disabled = true;
+                    submitButton.textContent = 'Processing...';
+
+                    // Simulate the first step immediately
+                    document.getElementById('step-upload').classList.add('completed');
+                    
+                    try {
+                        // Use a fetch request to handle the form submission
+                        const response = await fetch(form.action, {
+                            method: 'POST',
+                            body: formData
+                        });
+
+                        // Step 2: Preprocessing
+                        document.getElementById('step-preprocess').classList.add('completed');
+
+                        // Step 3: Prediction
+                        document.getElementById('step-predict').classList.add('completed');
+
+                        const result = await response.json();
+
+                        // Display the result
+                        if (result.error) {
+                            resultDiv.classList.remove('hidden');
+                            resultDiv.className = 'mt-8 p-4 rounded-xl text-center bg-red-100 text-red-700';
+                            resultDiv.innerHTML = `<p class="font-bold text-lg">Error:</p><p class="mt-2">${result.error}</p>`;
+                        } else {
+                            resultDiv.classList.remove('hidden');
+                            const isPneumonia = result.result === 'PNEUMONIA';
+                            resultDiv.className = `mt-8 p-4 rounded-xl text-center ${isPneumonia ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`;
+                            resultDiv.innerHTML = `
+                                <p class="font-bold text-lg">Prediction Result:</p>
+                                <p class="text-2xl mt-2 font-bold">${result.result}</p>
+                            `;
+                        }
+
+                    } catch (error) {
+                        resultDiv.classList.remove('hidden');
+                        resultDiv.className = 'mt-8 p-4 rounded-xl text-center bg-red-100 text-red-700';
+                        resultDiv.innerHTML = `<p class="font-bold text-lg">An error occurred:</p><p class="mt-2">${error.message}</p>`;
+                    } finally {
+                        submitButton.disabled = false;
+                        submitButton.textContent = 'Predict';
+                    }
+                });
+            </script>
         </body>
         </html>
-    ''', prediction=prediction_result)
+    ''')
+
+@app.route('/predict', methods=['POST'])
+def predict():
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part in the request."})
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No file selected."})
+
+    if file:
+        filename = secure_filename(file.filename)
+        filepath = os.path.join(TEMP_UPLOAD_DIR, filename)
+
+        try:
+            # Save the file to a temporary location
+            file.save(filepath)
+
+            # Get the prediction
+            prediction_data = predict_pneumonia(filepath)
+            return jsonify(prediction_data)
+        except Exception as e:
+            return jsonify({"error": str(e)})
+        finally:
+            # Clean up the uploaded file
+            if os.path.exists(filepath):
+                os.remove(filepath)
 
 if __name__ == '__main__':
     # You can still run the app directly for local testing
