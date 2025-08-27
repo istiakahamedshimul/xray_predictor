@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>X-Ray Predictor</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f0f2f5;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            color: #333;
+        }
+        .container {
+            background-color: white;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            width: 90%;
+            max-width: 500px;
+        }
+        h1 {
+            color: #1a73e8;
+            margin-bottom: 10px;
+        }
+        p {
+            margin-bottom: 30px;
+            color: #666;
+        }
+        form {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .file-input-container {
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            cursor: pointer;
+            width: 100%;
+        }
+        input[type="file"] {
+            display: none;
+        }
+        .file-label {
+            font-size: 16px;
+            color: #1a73e8;
+            font-weight: bold;
+        }
+        .upload-btn {
+            background-color: #1a73e8;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+        .upload-btn:hover {
+            background-color: #1765cf;
+        }
+        .prediction-result {
+            margin-top: 30px;
+            font-size: 24px;
+            font-weight: bold;
+            padding: 20px;
+            border-radius: 8px;
+            display: inline-block;
+        }
+        .prediction-result.NORMAL {
+            background-color: #e6f4ea;
+            color: #34a853;
+        }
+        .prediction-result.PNEUMONIA {
+            background-color: #fce8e6;
+            color: #ea4335;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Chest X-Ray Predictor</h1>
+        <p>Upload a chest X-ray image to get a quick prediction (NORMAL or PNEUMONIA).</p>
+        
+        <form action="/predict" method="post" enctype="multipart/form-data">
+            <div class="file-input-container" onclick="document.getElementById('file-upload').click();">
+                <span class="file-label">Choose an X-Ray Photo</span>
+            </div>
+            <input type="file" name="file" id="file-upload" accept=".jpg, .jpeg, .png">
+            <button type="submit" class="upload-btn">Get Prediction</button>
+        </form>
+
+        {% if prediction %}
+            <div class="prediction-result {{ prediction }}">
+                Prediction: {{ prediction }}
+            </div>
+        {% endif %}
+    </div>
+</body>
+</html>
