@@ -4,3 +4,4 @@ Pillow
 tensorflow
 protobuf
 requests
+gunicorn
